@@ -52,11 +52,18 @@ In oXygen: **Help → Install new add-ons…**, paste this URL, follow the wizar
 **restart oXygen**:
 
 ```
-https://raw.githubusercontent.com/kraenzle-ritter/anton-oxy/main/addon/updateSite.xml
+https://github.com/kraenzle-ritter/anton-oxy/releases/latest/download/updateSite.xml
 ```
 
-No admin rights needed, and it survives oXygen updates. After restarting, set your
-Anton URL under **Anton → Anton-Einstellungen…** (default `https://kr.anton.ch`).
+No admin rights needed, it survives oXygen updates, and **Check for add-on updates**
+will pick up future releases automatically. After restarting, set your Anton URL under
+**Anton → Anton-Einstellungen…** (default `https://kr.anton.ch`).
+
+### Even simpler on macOS
+
+Double-click **`install-mac.command`** (from a clone of this repo). It downloads the
+latest release and installs it into your local oXygen — no Terminal, no Java needed.
+Restart oXygen afterwards.
 
 ---
 
