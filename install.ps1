@@ -17,7 +17,7 @@ function Find-Oxygen {
     return $null
 }
 
-$version = '1.0.1'
+$version = '1.1.0'
 $jar = "lib\anton-oxy-$version.jar"
 if (-not (Test-Path $jar)) { Write-Error 'Plugin jar missing - run .\build.ps1 first.'; exit 1 }
 

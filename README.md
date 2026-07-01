@@ -93,7 +93,7 @@ updates). Build the jar once, package the add-on, then install via the oXygen GU
 
 ```bash
 ./build.sh          # compile (set OXYGEN_DIR if oXygen is elsewhere)
-./make-addon.sh     # package add-on  ->  addon/updateSite.xml + dist/anton-oxy-1.0.1.zip
+./make-addon.sh     # package add-on  ->  addon/updateSite.xml + dist/anton-oxy-1.1.0.zip
 # ── or copy straight into the app: ──
 ./install.sh        # copies into "<oXygen>/plugins/anton-oxy"
 ```

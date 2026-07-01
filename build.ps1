@@ -30,7 +30,7 @@ if (-not $oxy -or -not (Test-Path (Join-Path $oxy 'lib\oxygen.jar'))) {
     exit 1
 }
 
-$version = '1.0.1'
+$version = '1.1.0'
 $jarName = "anton-oxy-$version.jar"
 $cp = (Get-ChildItem (Join-Path $oxy 'lib\*.jar') | ForEach-Object { $_.FullName }) -join ';'
 
