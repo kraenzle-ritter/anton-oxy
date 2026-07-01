@@ -4,7 +4,7 @@
     id="ch.kr.anton.oxy"
     name="anton-oxy"
     description="Searches actors and places live in Anton and writes the id (e.g. {slug}-actors-123) into a configurable attribute (default @ref) of the element under the caret."
-    version="1.0.0"
+    version="1.0.1"
     vendor="K-R / UZH ZDE"
     class="ch.kr.anton.oxy.AntonOxyPlugin"
     classLoaderType="preferReferencedResources">
