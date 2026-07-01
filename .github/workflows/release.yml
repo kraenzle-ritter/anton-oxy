@@ -57,7 +57,8 @@ jobs:
           PKG="anton-oxy-$V"
           mkdir -p "dist/$PKG/lib"
           cp plugin.xml "dist/$PKG/plugin.xml"
-          jar --create --file "dist/$PKG/lib/anton-oxy-$V.jar" -C build/classes .
+          # Classic jar syntax — JDK 8's jar tool lacks the --create/--file long options.
+          jar cf "dist/$PKG/lib/anton-oxy-$V.jar" -C build/classes .
           (cd dist && zip -r -q "$PKG.zip" "$PKG")
 
           # Add-on descriptor pointing at this release's zip asset (printf avoids
