@@ -25,6 +25,8 @@ public class ManualTest {
     public static void main(String[] args) throws Exception {
         testJson();
         testTextMode();
+        testWrap();
+        testNextOccurrence();
         testConfig();
         System.out.println(failures == 0 ? "\nALL TESTS PASSED" : "\n" + failures + " TEST(S) FAILED");
         if (failures > 0) {
@@ -101,6 +103,66 @@ public class ManualTest {
         } else {
             fail(label + "\n   expected tag: " + expectStartTag + "\n   result: " + after);
         }
+    }
+
+    // --- Wrap & Tag ---------------------------------------------------------
+
+    private static void testWrap() throws Exception {
+        // Select "Anna Sulger" in bare text and wrap it in persName.
+        String xml = "<p>Wie Anna Sulger, von</p>";
+        int a = xml.indexOf("Anna");
+        int b = a + "Anna Sulger".length();
+        WSEditor ed = editorSel(xml, a, b);
+
+        RefTargets.WrapTarget w = RefTargets.locateSelection(ed);
+        if (w == null) {
+            fail("wrap: no selection located");
+            return;
+        }
+        check("wrap selectedText", "Anna Sulger", w.selectedText());
+
+        int after = w.wrap("persName", "ref", "sulger-actors-1");
+        String doc = lastDoc.getText(0, lastDoc.getLength());
+        check("wrap inserts element", "true", String.valueOf(
+                doc.contains("<persName ref=\"sulger-actors-1\">Anna Sulger</persName>")));
+        check("wrap after offset points past close tag", "true",
+                String.valueOf(after == doc.indexOf("</persName>") + "</persName>".length()));
+
+        // Attribute value is XML-escaped.
+        WSEditor ed2 = editorSel("<p>x</p>", "<p>".length(), "<p>x".length());
+        RefTargets.locateSelection(ed2).wrap("term", "key", "a&b\"c");
+        check("wrap escapes attr value", "true", String.valueOf(
+                lastDoc.getText(0, lastDoc.getLength())
+                        .contains("<term key=\"a&amp;b&quot;c\">x</term>")));
+
+        // A blank selection is not a wrap target.
+        WSEditor ed3 = editorSel("<p>   </p>", "<p>".length(), "<p>   ".length());
+        check("blank selection -> null", "null", String.valueOf(RefTargets.locateSelection(ed3)));
+    }
+
+    // --- Next occurrence ----------------------------------------------------
+
+    private static void testNextOccurrence() throws Exception {
+        String xml = "<p>Wie Anna Sulger und Anna Sulger, von</p>";
+        int a = xml.indexOf("Anna");
+        int b = a + "Anna Sulger".length();
+        WSEditor ed = editorSel(xml, a, b);
+
+        RefTargets.WrapTarget w = RefTargets.locateSelection(ed);
+        int after = w.wrap("persName", "ref", "sulger-actors-1");
+
+        boolean found = RefTargets.selectNext(ed, "Anna Sulger", after);
+        check("next occurrence found", "true", String.valueOf(found));
+        // The freshly selected range must be the SECOND, still-untagged occurrence.
+        WSTextEditorPage tp = (WSTextEditorPage) ((WSEditor) ed).getCurrentPage();
+        check("next selects untagged occurrence", "Anna Sulger",
+                lastDoc.getText(tp.getSelectionStart(), tp.getSelectionEnd() - tp.getSelectionStart()));
+        check("next occurrence is past the tagged one", "true",
+                String.valueOf(tp.getSelectionStart() >= after));
+
+        // No further occurrence -> false.
+        check("no further occurrence", "false",
+                String.valueOf(RefTargets.selectNext(ed, "Anna Sulger", tp.getSelectionEnd())));
     }
 
     // --- Config: template / mapping / custom attribute ----------------------
@@ -204,6 +266,46 @@ public class ManualTest {
                         if (n.equals("getSelectionEnd")) return hasSel ? selEnd : selStart;
                         if (n.equals("hasSelection")) return hasSel;
                         if (n.equals("getSelectedText")) return null;
+                        return defaultFor(method.getReturnType());
+                    }
+                });
+
+        return (WSEditor) Proxy.newProxyInstance(
+                ManualTest.class.getClassLoader(),
+                new Class[] { WSEditor.class },
+                new InvocationHandler() {
+                    public Object invoke(Object proxy, Method method, Object[] a) {
+                        if (method.getName().equals("getCurrentPage")) {
+                            return page;
+                        }
+                        return defaultFor(method.getReturnType());
+                    }
+                });
+    }
+
+    /**
+     * Editor with a real, mutable text selection: {@code getSelectedText} returns the
+     * selected substring and {@code select(a,b)} updates it (so selectNext is testable).
+     */
+    private static WSEditor editorSel(String xml, int selStart, int selEnd) throws Exception {
+        final PlainDocument doc = new PlainDocument();
+        doc.insertString(0, xml, null);
+        lastDoc = doc;
+        final int[] sel = { selStart, selEnd };
+
+        final WSTextEditorPage page = (WSTextEditorPage) Proxy.newProxyInstance(
+                ManualTest.class.getClassLoader(),
+                new Class[] { WSTextEditorPage.class },
+                new InvocationHandler() {
+                    public Object invoke(Object proxy, Method method, Object[] a) throws Exception {
+                        String n = method.getName();
+                        if (n.equals("getDocument")) return doc;
+                        if (n.equals("getCaretOffset")) return sel[0];
+                        if (n.equals("getSelectionStart")) return sel[0];
+                        if (n.equals("getSelectionEnd")) return sel[1];
+                        if (n.equals("hasSelection")) return sel[1] > sel[0];
+                        if (n.equals("getSelectedText")) return doc.getText(sel[0], sel[1] - sel[0]);
+                        if (n.equals("select")) { sel[0] = (Integer) a[0]; sel[1] = (Integer) a[1]; return null; }
                         return defaultFor(method.getReturnType());
                     }
                 });

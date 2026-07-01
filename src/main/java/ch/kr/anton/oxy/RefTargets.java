@@ -44,6 +44,28 @@ final class RefTargets {
         String currentRef();
         /** Write/replace the configured attribute with {@code value}. */
         void writeRef(String value) throws Exception;
+        /**
+         * Document offset from which a "next occurrence" search may continue so it
+         * does not re-match the text just tagged (Text mode), or {@code -1} when the
+         * mode cannot report one (Author mode). Call after {@link #writeRef}.
+         */
+        int afterOffset();
+    }
+
+    /**
+     * A plain text selection that is <i>not</i> (yet) inside a mapped element and can
+     * be wrapped in a fresh element carrying the reference — the "Wrap &amp; Tag" flow.
+     */
+    interface WrapTarget {
+        /** The selected text, verbatim (used as search prefill and for "next occurrence"). */
+        String selectedText();
+        /**
+         * Surround the selection with {@code <elementName attr="value">…</elementName>}.
+         *
+         * @return Text mode: the document offset just after the inserted element (so a
+         *         "next occurrence" search continues past it); Author mode: {@code -1}.
+         */
+        int wrap(String elementName, String attr, String value) throws Exception;
     }
 
     /** Convenience overload (default mapping + {@code @ref}) — used by tests. */
@@ -75,6 +97,177 @@ final class RefTargets {
             return locateText((WSTextEditorPage) page, targets);
         }
         return null;
+    }
+
+    // --- Wrap & Tag: locate a bare selection to be wrapped -----------------
+
+    /**
+     * @return a {@link WrapTarget} for the current text selection, or null if there is
+     *         no non-blank selection. The caller should only reach for this when
+     *         {@link #locate} found no mapped element under the caret.
+     */
+    static WrapTarget locateSelection(WSEditor editor) {
+        if (editor == null) {
+            return null;
+        }
+        WSEditorPage page = editor.getCurrentPage();
+        if (page instanceof WSTextEditorPage) {
+            return locateSelectionText((WSTextEditorPage) page);
+        }
+        if (page instanceof WSAuthorEditorPage) {
+            return locateSelectionAuthor((WSAuthorEditorPage) page);
+        }
+        return null;
+    }
+
+    private static WrapTarget locateSelectionText(WSTextEditorPage page) {
+        try {
+            if (!page.hasSelection()) {
+                return null;
+            }
+            int start = page.getSelectionStart();
+            int end = page.getSelectionEnd();
+            if (end <= start) {
+                return null;
+            }
+            Document doc = page.getDocument();
+            String sel = doc.getText(start, end - start);
+            if (sel == null || sel.trim().isEmpty()) {
+                return null;
+            }
+            return new TextWrapTarget(doc, start, end, sel);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static WrapTarget locateSelectionAuthor(WSAuthorEditorPage page) {
+        try {
+            if (!page.hasSelection()) {
+                return null;
+            }
+            int start = page.getSelectionStart();
+            int end = page.getSelectionEnd();
+            if (end <= start) {
+                return null;
+            }
+            String sel = page.getSelectedText();
+            if (sel == null || sel.trim().isEmpty()) {
+                return null;
+            }
+            AuthorDocumentController ctrl = page.getDocumentController();
+            return new AuthorWrapTarget(ctrl, start, end, sel, namespaceAt(ctrl, start));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Nearest non-empty namespace at {@code offset}, so a wrapped element stays in it. */
+    private static String namespaceAt(AuthorDocumentController ctrl, int offset) {
+        try {
+            AuthorNode node = ctrl.getNodeAtOffset(offset);
+            while (node != null) {
+                if (node instanceof AuthorElement) {
+                    String ns = ((AuthorElement) node).getNamespace();
+                    if (ns != null && !ns.isEmpty()) {
+                        return ns;
+                    }
+                }
+                node = node.getParent();
+            }
+        } catch (Exception e) {
+            // fall through
+        }
+        return "";
+    }
+
+    /**
+     * Select the next verbatim occurrence of {@code surface} at or after {@code fromOffset}
+     * (Text mode only), so the editor can tag it next. Author mode is not supported and
+     * returns false.
+     */
+    static boolean selectNext(WSEditor editor, String surface, int fromOffset) {
+        if (editor == null || surface == null || surface.isEmpty() || fromOffset < 0) {
+            return false;
+        }
+        WSEditorPage page = editor.getCurrentPage();
+        if (!(page instanceof WSTextEditorPage)) {
+            return false;
+        }
+        try {
+            WSTextEditorPage tp = (WSTextEditorPage) page;
+            Document doc = tp.getDocument();
+            String text = doc.getText(0, doc.getLength());
+            int idx = text.indexOf(surface, Math.min(fromOffset, text.length()));
+            if (idx < 0) {
+                return false;
+            }
+            tp.select(idx, idx + surface.length());
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static String escapeAttr(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;");
+    }
+
+    private static final class TextWrapTarget implements WrapTarget {
+        private final Document doc;
+        private final int start;
+        private final int end;
+        private final String selected;
+
+        TextWrapTarget(Document doc, int start, int end, String selected) {
+            this.doc = doc;
+            this.start = start;
+            this.end = end;
+            this.selected = selected;
+        }
+
+        public String selectedText() { return selected; }
+
+        public int wrap(String elementName, String attr, String value) throws Exception {
+            String open = "<" + elementName + " " + attr + "=\"" + escapeAttr(value) + "\">";
+            String close = "</" + elementName + ">";
+            String wrapped = open + selected + close;
+            doc.remove(start, end - start);
+            doc.insertString(start, wrapped, null);
+            return start + wrapped.length();
+        }
+    }
+
+    private static final class AuthorWrapTarget implements WrapTarget {
+        private final AuthorDocumentController ctrl;
+        private final int start;
+        private final int end;
+        private final String selected;
+        private final String ns;
+
+        AuthorWrapTarget(AuthorDocumentController ctrl, int start, int end, String selected, String ns) {
+            this.ctrl = ctrl;
+            this.start = start;
+            this.end = end;
+            this.selected = selected;
+            this.ns = ns;
+        }
+
+        public String selectedText() { return selected; }
+
+        public int wrap(String elementName, String attr, String value) throws Exception {
+            StringBuilder frag = new StringBuilder("<").append(elementName);
+            if (ns != null && !ns.isEmpty()) {
+                frag.append(" xmlns=\"").append(escapeAttr(ns)).append("\"");
+            }
+            frag.append(" ").append(attr).append("=\"").append(escapeAttr(value)).append("\"/>");
+            // surroundInFragment uses an inclusive end offset -> end - 1.
+            ctrl.surroundInFragment(frag.toString(), start, end - 1);
+            return -1; // "next occurrence" is Text-mode only
+        }
     }
 
     private static String localName(String qName) {
@@ -145,6 +338,8 @@ final class RefTargets {
         public void writeRef(String value) {
             ctrl.setAttribute(attr, new AttrValue(value), el);
         }
+
+        public int afterOffset() { return -1; } // Author mode: "next occurrence" unsupported
     }
 
     // --- Text mode ---------------------------------------------------------
@@ -274,6 +469,20 @@ final class RefTargets {
             int len = tagEnd - tagStart + 1;
             doc.remove(tagStart, len);
             doc.insertString(tagStart, newTag, null);
+        }
+
+        /**
+         * Anchor a "next occurrence" search at this element's close tag (the just-tagged
+         * text sits before it, so it won't be re-matched). {@code writeRef} only rewrites
+         * the start tag in place, so {@code tagStart} still points at it afterwards.
+         */
+        public int afterOffset() {
+            try {
+                String t = doc.getText(0, doc.getLength());
+                return indexOfCloseTag(t, name, tagStart);
+            } catch (Exception e) {
+                return -1;
+            }
         }
 
         private String buildTag(String startTag, String value) {

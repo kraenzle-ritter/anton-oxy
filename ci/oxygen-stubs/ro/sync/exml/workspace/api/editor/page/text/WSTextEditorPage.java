@@ -7,4 +7,5 @@ public interface WSTextEditorPage extends WSEditorPage {
     int getSelectionEnd();
     boolean hasSelection();
     String getSelectedText();
+    void select(int startOffset, int endOffset);
 }

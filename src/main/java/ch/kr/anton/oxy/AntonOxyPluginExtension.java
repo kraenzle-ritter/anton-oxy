@@ -58,7 +58,7 @@ public class AntonOxyPluginExtension
             return;
         }
         JButton button = new JButton("Anton @ref");
-        button.setToolTipText("Akteur/Ort in Anton suchen und @ref einfügen");
+        button.setToolTipText("Cursor in ein Element oder Text markieren: in Anton suchen und Referenz einfügen/umschließen");
         button.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 insertReference();
@@ -112,29 +112,87 @@ public class AntonOxyPluginExtension
             info("Kein XML-Dokument geöffnet.");
             return;
         }
-        final RefTargets.RefTarget target =
-                RefTargets.locate(editor, config.getTargets());
-        if (target == null) {
+        // Serial tagging: after each insert the user can ask to jump to the next
+        // occurrence of the same text (Text mode), which re-enters this loop as a
+        // fresh selection -> wrap flow. `preferElement` keeps the wrap element sticky.
+        String preferElement = null;
+        while (tagOnce(editor, preferElement)) {
+            preferElement = lastElement;
+        }
+    }
+
+    /** Set when {@link #tagOnce} succeeds — the element used, so the next round can preselect it. */
+    private String lastElement;
+
+    /**
+     * Run one tag operation. If the caret is in a mapped element the reference is set on
+     * it; otherwise a non-blank selection is wrapped in a chosen element. Returns true
+     * only when the user asked to continue <em>and</em> a next occurrence was selected.
+     */
+    private boolean tagOnce(WSEditor editor, String preferElement) {
+        RefTargets.RefTarget existing = RefTargets.locate(editor, config.getTargets());
+        RefTargets.WrapTarget wrap = existing == null ? RefTargets.locateSelection(editor) : null;
+        boolean wrapMode = existing == null;
+
+        if (existing == null && (wrap == null || wrap.selectedText().trim().isEmpty())) {
             info("Cursor in ein konfiguriertes Element setzen ("
-                    + String.join(", ", config.getTargets().keySet()) + "),\n"
-                    + "dann die Aktion erneut auslösen.");
-            return;
+                    + String.join(", ", config.getTargets().keySet()) + ")\n"
+                    + "— oder Text markieren, um ihn zu umschließen —\n"
+                    + "und die Aktion erneut auslösen.");
+            return false;
         }
 
-        AntonEntity chosen = new SearchDialog(
-                activeWindow(), client, config,
-                target.register(), target.elementName(),
-                target.currentText(), target.currentRef()
-        ).showDialog();
+        String prefill = wrapMode ? collapse(wrap.selectedText()) : existing.currentText();
+        SearchDialog dlg = new SearchDialog(
+                activeWindow(), client, config, wrapMode,
+                wrapMode ? null : existing.register(),
+                wrapMode ? null : existing.elementName(),
+                prefill,
+                wrapMode ? null : existing.currentRef(),
+                preferElement);
 
+        AntonEntity chosen = dlg.showDialog();
         if (chosen == null) {
-            return; // cancelled
+            return false; // cancelled -> stop the loop
         }
+
+        String surface;
+        int anchor;
         try {
-            target.writeRef(config.formatRef(chosen));
+            String value = config.formatRef(chosen);
+            if (wrapMode) {
+                surface = wrap.selectedText();
+                anchor = wrap.wrap(dlg.chosenElement(), dlg.chosenAttr(), value);
+                lastElement = dlg.chosenElement();
+            } else {
+                surface = existing.currentText();
+                existing.writeRef(value);
+                anchor = existing.afterOffset();
+                lastElement = existing.elementName();
+            }
         } catch (Exception ex) {
-            error("Konnte @ref nicht setzen: " + ex.getMessage());
+            error("Konnte Referenz nicht setzen: " + ex.getMessage());
+            return false;
         }
+
+        if (!dlg.wantsNext()) {
+            return false;
+        }
+        if (surface == null || surface.trim().isEmpty() || anchor < 0
+                || !RefTargets.selectNext(editor, surface, anchor)) {
+            info("Keine weiteren Vorkommen von „" + collapse(surface) + "“ gefunden\n"
+                    + "(„Weiter“ funktioniert nur in der Textansicht).");
+            return false;
+        }
+        return true; // next occurrence selected -> loop and tag it too
+    }
+
+    private static String collapse(String s) {
+        if (s == null) {
+            return "";
+        }
+        s = s.replaceAll("\\s+", " ").trim();
+        return s.length() > 80 ? s.substring(0, 80).trim() : s;
     }
 
     // --- ui helpers --------------------------------------------------------

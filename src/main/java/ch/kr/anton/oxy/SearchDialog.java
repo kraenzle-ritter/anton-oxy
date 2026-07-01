@@ -31,8 +31,20 @@ import javax.swing.event.DocumentListener;
 
 /**
  * Modal dialog that searches Anton live (one HTTP request per query, debounced) and
- * lets the editor pick an actor or place. The chosen {@link AntonEntity#fullId} is
- * what gets written into the TEI {@code @ref} attribute.
+ * lets the editor pick an actor, place or keyword. The chosen {@link AntonEntity#fullId}
+ * is what gets written into the TEI reference attribute.
+ *
+ * <p>Two modes:</p>
+ * <ul>
+ *   <li><b>Edit</b> — the caret sits in a mapped element; the top combo switches the
+ *       search register, the reference is written onto the existing element.</li>
+ *   <li><b>Wrap</b> — a bare text selection is being tagged; the top combo picks which
+ *       element to wrap the selection in ({@link #chosenElement()} /
+ *       {@link #chosenAttr()}), and the register follows that element.</li>
+ * </ul>
+ *
+ * <p>"Einfügen &amp; weiter" ({@link #wantsNext()}) lets the caller jump to the next
+ * occurrence of the tagged text and tag it too, for fast serial tagging.</p>
  */
 final class SearchDialog extends JDialog {
 
@@ -40,44 +52,65 @@ final class SearchDialog extends JDialog {
 
     private final AntonClient client;
     private final Config config;
+    private final boolean wrapMode;
 
-    private final JComboBox<RegisterItem> registerCombo;
+    private final JComboBox<Choice> choiceCombo;
     private final JTextField searchField;
     private final DefaultListModel<AntonEntity> model = new DefaultListModel<AntonEntity>();
     private final JList<AntonEntity> resultList = new JList<AntonEntity>(model);
     private final JLabel status = new JLabel(" ");
     private final JButton okButton = new JButton("Einfügen");
+    private final JButton nextButton = new JButton("Einfügen & weiter");
 
     private final Timer debounce;
     private SwingWorker<List<AntonEntity>, Void> running;
     private long querySeq = 0;
 
-    private AntonEntity result; // null = cancelled
+    private AntonEntity result;      // null = cancelled
+    private Choice chosenChoice;     // the combo entry active when accepted
+    private boolean andNext;         // true = user asked to continue with the next occurrence
 
+    /**
+     * @param wrapMode      true to wrap a selection (element chooser), false to edit an existing element
+     * @param initialRegister register to preselect in edit mode (ignored in wrap mode)
+     * @param elementName   the located element name (edit mode) — shown in the context line
+     * @param prefill       text to seed the search field with
+     * @param currentRef    existing reference value to show (edit mode), may be null
+     * @param preferElement element to preselect in wrap mode (e.g. the previously tagged one), may be null
+     */
     SearchDialog(Window owner, AntonClient client, Config config,
-                 String initialRegister, String elementName, String prefill, String currentRef) {
-        super(owner, "Anton-Referenz einfügen", ModalityType.APPLICATION_MODAL);
+                 boolean wrapMode, String initialRegister, String elementName,
+                 String prefill, String currentRef, String preferElement) {
+        super(owner, wrapMode ? "Anton-Referenz – Markierung taggen" : "Anton-Referenz einfügen",
+                ModalityType.APPLICATION_MODAL);
         this.client = client;
         this.config = config;
+        this.wrapMode = wrapMode;
 
-        registerCombo = new JComboBox<RegisterItem>(buildRegisterItems(config));
-        selectRegister(initialRegister);
+        choiceCombo = new JComboBox<Choice>(
+                wrapMode ? buildElementChoices(config) : buildRegisterChoices(config));
+        if (wrapMode) {
+            selectElement(preferElement);
+        } else {
+            selectRegister(initialRegister);
+        }
 
         searchField = new JTextField(prefill == null ? "" : prefill, 32);
 
-        // --- north: context + register + search field ---
+        // --- north: context + register/element + search field ---
         JPanel north = new JPanel(new BorderLayout(6, 6));
         north.setBorder(BorderFactory.createEmptyBorder(10, 10, 4, 10));
-
-        StringBuilder ctx = new StringBuilder("<html>Element <b>&lt;").append(elementName).append("&gt;</b>");
-        if (currentRef != null && !currentRef.isEmpty()) {
-            ctx.append(" &nbsp;·&nbsp; aktuell: <code>").append(escape(currentRef)).append("</code>");
-        }
-        ctx.append("</html>");
-        north.add(new JLabel(ctx.toString()), BorderLayout.NORTH);
+        north.add(new JLabel(contextHtml(wrapMode, elementName, prefill, currentRef)), BorderLayout.NORTH);
 
         JPanel row = new JPanel(new BorderLayout(6, 0));
-        row.add(registerCombo, BorderLayout.WEST);
+        if (wrapMode) {
+            JPanel west = new JPanel(new BorderLayout(6, 0));
+            west.add(new JLabel("Als Element: "), BorderLayout.WEST);
+            west.add(choiceCombo, BorderLayout.CENTER);
+            row.add(west, BorderLayout.WEST);
+        } else {
+            row.add(choiceCombo, BorderLayout.WEST);
+        }
         row.add(searchField, BorderLayout.CENTER);
         north.add(row, BorderLayout.SOUTH);
 
@@ -90,10 +123,12 @@ final class SearchDialog extends JDialog {
         // --- south: status + buttons ---
         JButton settings = new JButton("Einstellungen…");
         JButton cancel = new JButton("Abbrechen");
+        nextButton.setToolTipText("Einfügen und danach das nächste Vorkommen dieses Textes markieren (nur Textansicht)");
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 6));
         buttons.add(settings);
         buttons.add(cancel);
+        buttons.add(nextButton);
         buttons.add(okButton);
 
         JPanel south = new JPanel(new BorderLayout());
@@ -107,6 +142,7 @@ final class SearchDialog extends JDialog {
         add(south, BorderLayout.SOUTH);
 
         okButton.setEnabled(false);
+        nextButton.setEnabled(false);
 
         // --- behaviour ---
         debounce = new Timer(300, new ActionListener() {
@@ -122,7 +158,7 @@ final class SearchDialog extends JDialog {
             public void changedUpdate(DocumentEvent e) { debounce.restart(); }
         });
 
-        registerCombo.addActionListener(new ActionListener() {
+        choiceCombo.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) { runSearch(); }
         });
 
@@ -142,12 +178,12 @@ final class SearchDialog extends JDialog {
             }
         });
 
-        resultList.addListSelectionListener(e -> okButton.setEnabled(resultList.getSelectedValue() != null));
+        resultList.addListSelectionListener(e -> updateButtons());
 
         resultList.addMouseListener(new MouseAdapter() {
             public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() == 2 && resultList.getSelectedValue() != null) {
-                    accept();
+                    accept(false);
                 }
             }
         });
@@ -155,13 +191,16 @@ final class SearchDialog extends JDialog {
         resultList.addKeyListener(new KeyAdapter() {
             public void keyPressed(KeyEvent e) {
                 if (e.getKeyCode() == KeyEvent.VK_ENTER && resultList.getSelectedValue() != null) {
-                    accept();
+                    accept(false);
                 }
             }
         });
 
         okButton.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e) { accept(); }
+            public void actionPerformed(ActionEvent e) { accept(false); }
+        });
+        nextButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) { accept(true); }
         });
         cancel.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) { result = null; dispose(); }
@@ -175,7 +214,7 @@ final class SearchDialog extends JDialog {
         });
 
         getRootPane().setDefaultButton(okButton);
-        setMinimumSize(new Dimension(560, 420));
+        setMinimumSize(new Dimension(580, 440));
         pack();
         setLocationRelativeTo(owner);
 
@@ -196,23 +235,63 @@ final class SearchDialog extends JDialog {
         return result;
     }
 
-    private void accept() {
+    /** Wrap mode: the element the selection should be wrapped in (null in edit mode). */
+    String chosenElement() {
+        return (wrapMode && chosenChoice != null) ? chosenChoice.element : null;
+    }
+
+    /** Wrap mode: the attribute that receives the reference (null in edit mode). */
+    String chosenAttr() {
+        return (wrapMode && chosenChoice != null) ? chosenChoice.attr : null;
+    }
+
+    /** True if the editor asked to continue with the next occurrence after inserting. */
+    boolean wantsNext() {
+        return andNext;
+    }
+
+    private void accept(boolean next) {
         AntonEntity sel = resultList.getSelectedValue();
         if (sel != null) {
             result = sel;
+            andNext = next;
+            chosenChoice = (Choice) choiceCombo.getSelectedItem();
             dispose();
         }
     }
 
+    private void updateButtons() {
+        boolean has = resultList.getSelectedValue() != null;
+        okButton.setEnabled(has);
+        nextButton.setEnabled(has);
+    }
+
     private String currentRegister() {
-        RegisterItem it = (RegisterItem) registerCombo.getSelectedItem();
-        return it == null ? "actors" : it.register;
+        Choice c = (Choice) choiceCombo.getSelectedItem();
+        return c == null ? "actors" : c.register;
+    }
+
+    private static String contextHtml(boolean wrapMode, String elementName, String prefill, String currentRef) {
+        StringBuilder ctx = new StringBuilder("<html>");
+        if (wrapMode) {
+            ctx.append("Markierung <b>umschließen</b>");
+            if (prefill != null && !prefill.trim().isEmpty()) {
+                ctx.append(" &nbsp;·&nbsp; „<i>").append(escape(prefill.trim())).append("</i>“");
+            }
+        } else {
+            ctx.append("Element <b>&lt;").append(escape(elementName)).append("&gt;</b>");
+            if (currentRef != null && !currentRef.isEmpty()) {
+                ctx.append(" &nbsp;·&nbsp; aktuell: <code>").append(escape(currentRef)).append("</code>");
+            }
+        }
+        ctx.append("</html>");
+        return ctx.toString();
     }
 
     /** One combo entry per distinct register, labelled with the elements that map to it. */
-    private static RegisterItem[] buildRegisterItems(Config config) {
+    private static Choice[] buildRegisterChoices(Config config) {
         java.util.Map<String, String> mapping = config.getMapping();
-        java.util.List<RegisterItem> items = new java.util.ArrayList<RegisterItem>();
+        java.util.List<Choice> items = new java.util.ArrayList<Choice>();
         for (String reg : config.getRegisters()) {
             java.util.List<String> tags = new java.util.ArrayList<String>();
             for (java.util.Map.Entry<String, String> e : mapping.entrySet()) {
@@ -220,18 +299,45 @@ final class SearchDialog extends JDialog {
                     tags.add(e.getKey());
                 }
             }
-            items.add(new RegisterItem(reg + " (" + String.join(" / ", tags) + ")", reg));
+            items.add(new Choice(reg + " (" + String.join(" / ", tags) + ")", reg, null, null));
         }
         if (items.isEmpty()) {
-            items.add(new RegisterItem("actors", "actors"));
+            items.add(new Choice("actors", "actors", null, null));
         }
-        return items.toArray(new RegisterItem[0]);
+        return items.toArray(new Choice[0]);
+    }
+
+    /** One combo entry per mapped element, so a selection can be wrapped in it. */
+    private static Choice[] buildElementChoices(Config config) {
+        java.util.List<Choice> items = new java.util.ArrayList<Choice>();
+        for (java.util.Map.Entry<String, Config.Target> e : config.getTargets().entrySet()) {
+            String el = e.getKey();
+            Config.Target t = e.getValue();
+            String label = "<" + el + " " + t.attribute + "> → " + t.register;
+            items.add(new Choice(label, t.register, el, t.attribute));
+        }
+        if (items.isEmpty()) {
+            items.add(new Choice("<persName ref> → actors", "actors", "persName", "ref"));
+        }
+        return items.toArray(new Choice[0]);
     }
 
     private void selectRegister(String register) {
-        for (int i = 0; i < registerCombo.getItemCount(); i++) {
-            if (registerCombo.getItemAt(i).register.equals(register)) {
-                registerCombo.setSelectedIndex(i);
+        for (int i = 0; i < choiceCombo.getItemCount(); i++) {
+            if (choiceCombo.getItemAt(i).register.equals(register)) {
+                choiceCombo.setSelectedIndex(i);
+                return;
+            }
+        }
+    }
+
+    private void selectElement(String element) {
+        if (element == null) {
+            return;
+        }
+        for (int i = 0; i < choiceCombo.getItemCount(); i++) {
+            if (element.equals(choiceCombo.getItemAt(i).element)) {
+                choiceCombo.setSelectedIndex(i);
                 return;
             }
         }
@@ -246,7 +352,7 @@ final class SearchDialog extends JDialog {
         if (query.isEmpty()) {
             model.clear();
             status.setText("Suchbegriff eingeben…");
-            okButton.setEnabled(false);
+            updateButtons();
             return;
         }
         final long seq = ++querySeq;
@@ -272,12 +378,13 @@ final class SearchDialog extends JDialog {
                                 + (hits.size() >= config.getPerPage() ? " (ggf. mehr — Suche verfeinern)" : ""));
                         resultList.setSelectedIndex(0);
                     }
-                    okButton.setEnabled(resultList.getSelectedValue() != null);
+                    updateButtons();
                 } catch (Exception ex) {
                     model.clear();
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     status.setText("<html><font color='red'>Fehler: "
                             + escape(cause.getMessage()) + "</font></html>");
+                    updateButtons();
                 }
             }
         };
@@ -291,13 +398,21 @@ final class SearchDialog extends JDialog {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
-    /** Combo entry: human label + Anton register key. */
-    private static final class RegisterItem {
+    /**
+     * Combo entry. In edit mode only {@link #register} matters. In wrap mode it also
+     * carries the {@link #element} to wrap the selection in and the {@link #attr} that
+     * receives the reference.
+     */
+    private static final class Choice {
         final String label;
         final String register;
-        RegisterItem(String label, String register) {
+        final String element; // wrap mode only, else null
+        final String attr;    // wrap mode only, else null
+        Choice(String label, String register, String element, String attr) {
             this.label = label;
             this.register = register;
+            this.element = element;
+            this.attr = attr;
         }
         public String toString() { return label; }
     }

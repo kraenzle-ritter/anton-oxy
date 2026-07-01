@@ -4,4 +4,7 @@ import ro.sync.exml.workspace.api.editor.page.WSEditorPage;
 public interface WSAuthorEditorPage extends WSEditorPage {
     AuthorDocumentController getDocumentController();
     int getSelectionStart();
+    int getSelectionEnd();
+    boolean hasSelection();
+    String getSelectedText();
 }

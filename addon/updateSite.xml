@@ -3,7 +3,7 @@
     <xt:extension id="ch.kr.anton.oxy">
         <xt:location href="https://github.com/kraenzle-ritter/anton-oxy/releases/download/v1.0.1/anton-oxy-1.0.1.zip"/>
         <xt:version>1.0.1</xt:version>
-        <xt:oxy_version>22.0</xt:oxy_version>
+        <xt:oxy_version>22.0+</xt:oxy_version>
         <xt:type>plugin</xt:type>
         <xt:author>K-R / UZH ZDE</xt:author>
         <xt:name>anton-oxy</xt:name>

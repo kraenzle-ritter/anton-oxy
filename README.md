@@ -28,6 +28,10 @@ of `@ref` — see the per-element attribute override below.)
 
 ## How it works
 
+Two ways to start, then the same live search:
+
+**A — caret in an existing element** (set/replace the reference):
+
 1. Put the caret inside a mapped element — works in both **Text** and **Author** mode.
 2. Trigger the action: toolbar button **“Anton @ref”**, menu **Anton →
    Anton-Referenz einfügen**, or **Ctrl+Shift+A**.
@@ -35,6 +39,20 @@ of `@ref` — see the per-element attribute override below.)
    type; the register is preselected from the element but can be switched.
 4. Pick a hit (Enter / double-click / “Einfügen”) → the plugin sets or replaces the
    attribute on that element. Other attributes are preserved.
+
+**B — select bare text** (*Wrap & Tag*, the fast path):
+
+1. Select an untagged name/place/term (no element needed yet) and trigger the action.
+2. The dialog opens in **wrap mode**: pick which element to wrap the selection in
+   (`persName`, `placeName`, …) — the register follows that choice.
+3. Pick a hit → the plugin wraps the selection as
+   `<persName ref="…">selected text</persName>` in one step.
+
+**Serial tagging (“Einfügen & weiter”).** Either flow offers an **Einfügen & weiter**
+button next to **Einfügen**. It inserts the reference, then jumps to and selects the
+**next occurrence of the same text** and reopens the dialog — so tagging every mention
+of a person in a document is a rhythm of *pick → Enter → pick → Enter*. The previously
+chosen wrap element stays preselected. (Next-occurrence search works in **Text** mode.)
 
 ## Requirements
 
@@ -155,8 +173,9 @@ ID value template:  #{fullId}
 ```
 
 Offline sanity checks (no network): JSON parsing, Text-mode attribute insert/replace
-with attribute preservation and nesting, register mapping, per-element attribute
-overrides and id-value templates.
+with attribute preservation and nesting, Wrap &amp; Tag (element wrapping + attribute
+escaping), next-occurrence selection, register mapping, per-element attribute overrides
+and id-value templates.
 
 ## Project structure
 
