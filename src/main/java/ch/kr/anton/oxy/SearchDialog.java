@@ -61,14 +61,16 @@ final class SearchDialog extends JDialog {
     private final JLabel status = new JLabel(" ");
     private final JButton okButton = new JButton("Einfügen");
     private final JButton nextButton = new JButton("Einfügen & weiter");
+    private final JButton skipButton = new JButton("Überspringen");
 
     private final Timer debounce;
     private SwingWorker<List<AntonEntity>, Void> running;
     private long querySeq = 0;
 
-    private AntonEntity result;      // null = cancelled
+    private AntonEntity result;      // null = cancelled or skipped
     private Choice chosenChoice;     // the combo entry active when accepted
     private boolean andNext;         // true = user asked to continue with the next occurrence
+    private boolean skipped;         // true = user asked to skip this occurrence and continue
 
     /**
      * @param wrapMode      true to wrap a selection (element chooser), false to edit an existing element
@@ -124,10 +126,12 @@ final class SearchDialog extends JDialog {
         JButton settings = new JButton("Einstellungen…");
         JButton cancel = new JButton("Abbrechen");
         nextButton.setToolTipText("Einfügen und danach das nächste Vorkommen dieses Textes markieren (nur Textansicht)");
+        skipButton.setToolTipText("Dieses Vorkommen nicht taggen und zum nächsten Vorkommen springen (nur Textansicht)");
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 6));
         buttons.add(settings);
         buttons.add(cancel);
+        buttons.add(skipButton);
         buttons.add(nextButton);
         buttons.add(okButton);
 
@@ -202,6 +206,14 @@ final class SearchDialog extends JDialog {
         nextButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) { accept(true); }
         });
+        skipButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                result = null;
+                skipped = true;
+                chosenChoice = (Choice) choiceCombo.getSelectedItem();
+                dispose();
+            }
+        });
         cancel.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) { result = null; dispose(); }
         });
@@ -248,6 +260,14 @@ final class SearchDialog extends JDialog {
     /** True if the editor asked to continue with the next occurrence after inserting. */
     boolean wantsNext() {
         return andNext;
+    }
+
+    /**
+     * True if the user asked to <em>skip</em> this occurrence (no reference written) and
+     * jump to the next one. Mutually exclusive with a chosen entity from {@link #showDialog}.
+     */
+    boolean wantsSkip() {
+        return skipped;
     }
 
     private void accept(boolean next) {

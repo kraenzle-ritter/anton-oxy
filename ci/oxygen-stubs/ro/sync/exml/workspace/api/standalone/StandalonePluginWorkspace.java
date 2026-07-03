@@ -3,4 +3,5 @@ import ro.sync.exml.workspace.api.PluginWorkspace;
 public interface StandalonePluginWorkspace extends PluginWorkspace {
     void addToolbarComponentsCustomizer(ToolbarComponentsCustomizer customizer);
     void addMenuBarCustomizer(MenuBarCustomizer customizer);
+    Object getParentFrame(); // real oXygen API types this as Object (a java.awt.Frame at runtime)
 }

@@ -2,7 +2,7 @@ name: Release
 
 # Build the add-on and publish it as a GitHub Release whenever a v* tag is pushed.
 #
-#   git tag v1.1.0 && git push origin v1.1.0
+#   git tag v1.2.0 && git push origin v1.2.0
 #
 # oXygen cannot be redistributed, so CI compiles against the small compile-only API
 # stubs in ci/oxygen-stubs/ (signatures match the real oXygen classes; the real ones

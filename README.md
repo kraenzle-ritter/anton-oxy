@@ -54,6 +54,18 @@ button next to **Einfügen**. It inserts the reference, then jumps to and select
 of a person in a document is a rhythm of *pick → Enter → pick → Enter*. The previously
 chosen wrap element stays preselected. (Next-occurrence search works in **Text** mode.)
 
+The next-occurrence search matches **whole words only**: tagging `Schaan` skips over
+`Schaaner` and lands on the next standalone `Schaan`. When an occurrence *is* a whole-word
+match but you don’t want to tag it, **Überspringen** moves on to the next occurrence
+without writing anything — so a false positive never forces you to abort serial tagging.
+
+**Tagging dates.** A separate **Datum** action (toolbar button, menu **Anton → Datum
+taggen**, or **Ctrl+Shift+D**) wraps a selected date in `<date when="…">`. It best-effort
+normalises the selection to an ISO 8601 value — `3. Juli 2026`, `03.07.2026` and
+`Juli 2026` become `2026-07-03` / `2026-07` — which you confirm or correct, and you can
+switch the attribute to a range endpoint (`from`/`to`/`notBefore`/`notAfter`). No Anton
+lookup is involved. Works in **Text** and **Author** mode.
+
 ## Requirements
 
 - **Oxygen XML Editor/Author 22 or newer.** Compiled to Java 8 bytecode against the
@@ -93,7 +105,7 @@ updates). Build the jar once, package the add-on, then install via the oXygen GU
 
 ```bash
 ./build.sh          # compile (set OXYGEN_DIR if oXygen is elsewhere)
-./make-addon.sh     # package add-on  ->  addon/updateSite.xml + dist/anton-oxy-1.1.0.zip
+./make-addon.sh     # package add-on  ->  addon/updateSite.xml + dist/anton-oxy-1.2.0.zip
 # ── or copy straight into the app: ──
 ./install.sh        # copies into "<oXygen>/plugins/anton-oxy"
 ```

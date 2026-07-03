@@ -38,11 +38,16 @@ public class AntonOxyPluginExtension
     private StandalonePluginWorkspace workspace;
     private Config config;
     private AntonClient client;
+    private java.awt.Frame parentFrame;
 
     public void applicationStarted(StandalonePluginWorkspace pluginWorkspaceAccess) {
         this.workspace = pluginWorkspaceAccess;
         this.config = new Config(pluginWorkspaceAccess.getOptionsStorage());
         this.client = new AntonClient(config);
+        // getParentFrame() is typed Object in the oXygen API but is the main java.awt.Frame
+        // at runtime; keep it as a stable parent for message dialogs.
+        Object pf = pluginWorkspaceAccess.getParentFrame();
+        this.parentFrame = pf instanceof java.awt.Frame ? (java.awt.Frame) pf : null;
         pluginWorkspaceAccess.addToolbarComponentsCustomizer(this);
         pluginWorkspaceAccess.addMenuBarCustomizer(this);
     }
@@ -64,7 +69,14 @@ public class AntonOxyPluginExtension
                 insertReference();
             }
         });
-        toolbarInfo.setComponents(new JComponent[] { button });
+        JButton dateButton = new JButton("Datum");
+        dateButton.setToolTipText("Markiertes Datum als <date when=\"…\"> taggen");
+        dateButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                tagDate();
+            }
+        });
+        toolbarInfo.setComponents(new JComponent[] { button, dateButton });
     }
 
     // --- menu --------------------------------------------------------------
@@ -81,6 +93,14 @@ public class AntonOxyPluginExtension
             }
         });
 
+        JMenuItem date = new JMenuItem("Datum taggen …");
+        date.setAccelerator(KeyStroke.getKeyStroke("control shift D"));
+        date.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                tagDate();
+            }
+        });
+
         JMenuItem settings = new JMenuItem("Anton-Einstellungen …");
         settings.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
@@ -89,6 +109,7 @@ public class AntonOxyPluginExtension
         });
 
         menu.add(insert);
+        menu.add(date);
         menu.addSeparator();
         menu.add(settings);
 
@@ -118,6 +139,33 @@ public class AntonOxyPluginExtension
         String preferElement = null;
         while (tagOnce(editor, preferElement)) {
             preferElement = lastElement;
+        }
+    }
+
+    /**
+     * Wrap the current selection in a TEI {@code <date>} element. Unlike a reference, a date
+     * needs no Anton lookup — just a normalised value — so this is a small local dialog that
+     * best-effort parses the selection into an ISO 8601 value the user can confirm or fix.
+     */
+    private void tagDate() {
+        WSEditor editor = workspace.getCurrentEditorAccess(PluginWorkspace.MAIN_EDITING_AREA);
+        if (editor == null) {
+            info("Kein XML-Dokument geöffnet.");
+            return;
+        }
+        RefTargets.WrapTarget wrap = RefTargets.locateSelection(editor);
+        if (wrap == null || wrap.selectedText().trim().isEmpty()) {
+            info("Ein Datum markieren und die Aktion erneut auslösen.");
+            return;
+        }
+        DateDialog dlg = new DateDialog(activeWindow(), collapse(wrap.selectedText()));
+        if (!dlg.showDialog()) {
+            return; // cancelled
+        }
+        try {
+            wrap.wrap(dlg.element(), dlg.attr(), dlg.value());
+        } catch (Exception ex) {
+            error("Konnte Datum nicht taggen: " + ex.getMessage());
         }
     }
 
@@ -153,6 +201,15 @@ public class AntonOxyPluginExtension
 
         AntonEntity chosen = dlg.showDialog();
         if (chosen == null) {
+            // "Überspringen": don't tag this occurrence, but jump to the next one.
+            if (dlg.wantsSkip()) {
+                if (wrapMode) {
+                    lastElement = dlg.chosenElement();
+                    return continueNext(editor, wrap.selectedText(), wrap.searchAnchor());
+                }
+                lastElement = existing.elementName();
+                return continueNext(editor, existing.currentText(), existing.afterOffset());
+            }
             return false; // cancelled -> stop the loop
         }
 
@@ -178,6 +235,15 @@ public class AntonOxyPluginExtension
         if (!dlg.wantsNext()) {
             return false;
         }
+        return continueNext(editor, surface, anchor);
+    }
+
+    /**
+     * Select the next occurrence of {@code surface} from {@code anchor} so the loop can tag
+     * it too. Returns false (and tells the user) when there is none — which also ends the
+     * serial-tagging loop.
+     */
+    private boolean continueNext(WSEditor editor, String surface, int anchor) {
         if (surface == null || surface.trim().isEmpty() || anchor < 0
                 || !RefTargets.selectNext(editor, surface, anchor)) {
             info("Keine weiteren Vorkommen von „" + collapse(surface) + "“ gefunden\n"
@@ -202,12 +268,25 @@ public class AntonOxyPluginExtension
     }
 
     private void info(String msg) {
-        JOptionPane.showMessageDialog(activeWindow(), msg, "Anton-Referenz",
-                JOptionPane.INFORMATION_MESSAGE);
+        showMessage(msg, JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void error(String msg) {
-        JOptionPane.showMessageDialog(activeWindow(), msg, "Anton-Referenz",
-                JOptionPane.ERROR_MESSAGE);
+        showMessage(msg, JOptionPane.ERROR_MESSAGE);
+    }
+
+    /**
+     * Show a message parented to the stable oXygen main frame, on a later EDT cycle.
+     * Both matter: right after a modal search dialog closes {@link #activeWindow()} can be
+     * {@code null} (parenting the message to a hidden frame that stays behind oXygen until
+     * the user clicks), and showing it after the current event lets focus settle first.
+     */
+    private void showMessage(final String msg, final int type) {
+        final java.awt.Window owner = parentFrame != null ? parentFrame : activeWindow();
+        javax.swing.SwingUtilities.invokeLater(new Runnable() {
+            public void run() {
+                JOptionPane.showMessageDialog(owner, msg, "Anton-Referenz", type);
+            }
+        });
     }
 }

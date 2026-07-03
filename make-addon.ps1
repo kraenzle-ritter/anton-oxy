@@ -10,7 +10,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location -Path $PSScriptRoot
 
-$version = '1.1.0'
+$version = '1.2.0'
 $oxyMin  = '22.0'
 $id      = 'ch.kr.anton.oxy'
 $name    = 'anton-oxy'

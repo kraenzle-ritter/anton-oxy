@@ -27,6 +27,8 @@ public class ManualTest {
         testTextMode();
         testWrap();
         testNextOccurrence();
+        testWholeWord();
+        testDateGuess();
         testConfig();
         System.out.println(failures == 0 ? "\nALL TESTS PASSED" : "\n" + failures + " TEST(S) FAILED");
         if (failures > 0) {
@@ -163,6 +165,46 @@ public class ManualTest {
         // No further occurrence -> false.
         check("no further occurrence", "false",
                 String.valueOf(RefTargets.selectNext(ed, "Anna Sulger", tp.getSelectionEnd())));
+    }
+
+    // --- Whole-word next-occurrence search ----------------------------------
+
+    private static void testWholeWord() throws Exception {
+        // "Schaan" must not match inside "Schaaner" — Stefan's report.
+        String t = "nach Schaaner Art, dann Schaan selbst";
+        int schaan = t.indexOf("Schaan selbst");
+        check("whole word skips Schaaner", String.valueOf(schaan),
+                String.valueOf(RefTargets.indexOfWholeWord(t, "Schaan", 0)));
+        // No standalone "Schaan" at all -> not found.
+        check("whole word none in Schaaner",
+                "-1", String.valueOf(RefTargets.indexOfWholeWord("nur Schaaner hier", "Schaan", 0)));
+        // Multi-word surface still matches (boundaries are spaces/punctuation).
+        String m = "Wie Anna Sulger, von";
+        check("whole word multi-word",
+                String.valueOf(m.indexOf("Anna Sulger")),
+                String.valueOf(RefTargets.indexOfWholeWord(m, "Anna Sulger", 0)));
+        // selectNext honours the same boundary rule.
+        String xml = "<p>Schaaner Weg und Schaan hier</p>";
+        WSEditor ed = editorSel(xml, 0, 0);
+        boolean found = RefTargets.selectNext(ed, "Schaan", 0);
+        WSTextEditorPage tp = (WSTextEditorPage) ed.getCurrentPage();
+        check("selectNext skips Schaaner", "true", String.valueOf(found));
+        check("selectNext lands on whole Schaan", String.valueOf(xml.indexOf("Schaan hier")),
+                String.valueOf(tp.getSelectionStart()));
+    }
+
+    // --- Date parsing -------------------------------------------------------
+
+    private static void testDateGuess() {
+        check("iso year", "2026", DateDialog.guessIso("2026"));
+        check("iso full passthrough", "2026-07-03", DateDialog.guessIso("2026-07-03"));
+        check("german full", "2026-07-03", DateDialog.guessIso("3. Juli 2026"));
+        check("german month year", "2026-07", DateDialog.guessIso("Juli 2026"));
+        check("numeric full", "2026-07-03", DateDialog.guessIso("3.7.2026"));
+        check("numeric month year", "2026-07", DateDialog.guessIso("07.2026"));
+        check("umlaut month", "1712-03", DateDialog.guessIso("März 1712"));
+        check("fallback year", "1712", DateDialog.guessIso("um 1712 herum"));
+        check("unrecognised empty", "", DateDialog.guessIso("irgendwann"));
     }
 
     // --- Config: template / mapping / custom attribute ----------------------

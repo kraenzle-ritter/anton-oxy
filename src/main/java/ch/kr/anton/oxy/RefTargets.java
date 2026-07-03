@@ -66,6 +66,12 @@ final class RefTargets {
          *         "next occurrence" search continues past it); Author mode: {@code -1}.
          */
         int wrap(String elementName, String attr, String value) throws Exception;
+        /**
+         * Offset from which a "next occurrence" search should continue when the selection
+         * is <em>skipped</em> (not wrapped): the end of the current selection, so the same
+         * occurrence is not re-matched. Text mode only; Author mode returns {@code -1}.
+         */
+        int searchAnchor();
     }
 
     /** Convenience overload (default mapping + {@code @ref}) — used by tests. */
@@ -182,9 +188,14 @@ final class RefTargets {
     }
 
     /**
-     * Select the next verbatim occurrence of {@code surface} at or after {@code fromOffset}
-     * (Text mode only), so the editor can tag it next. Author mode is not supported and
-     * returns false.
+     * Select the next <em>whole-word</em> occurrence of {@code surface} at or after
+     * {@code fromOffset} (Text mode only), so the editor can tag it next. Author mode is
+     * not supported and returns false.
+     *
+     * <p>Whole-word means the match must sit on word boundaries, so tagging "Schaan" no
+     * longer stops inside "Schaaner". Only the boundary characters that are themselves
+     * word characters are constrained, so multi-word surfaces ("Anna Sulger") and ones
+     * ending in punctuation still match.</p>
      */
     static boolean selectNext(WSEditor editor, String surface, int fromOffset) {
         if (editor == null || surface == null || surface.isEmpty() || fromOffset < 0) {
@@ -198,7 +209,7 @@ final class RefTargets {
             WSTextEditorPage tp = (WSTextEditorPage) page;
             Document doc = tp.getDocument();
             String text = doc.getText(0, doc.getLength());
-            int idx = text.indexOf(surface, Math.min(fromOffset, text.length()));
+            int idx = indexOfWholeWord(text, surface, Math.min(fromOffset, text.length()));
             if (idx < 0) {
                 return false;
             }
@@ -207,6 +218,33 @@ final class RefTargets {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * First index of {@code needle} in {@code text} at or after {@code from} whose edges
+     * sit on word boundaries — emulating regex {@code \bneedle\b} for the needle's own
+     * boundary characters. Returns -1 if there is no such occurrence.
+     */
+    static int indexOfWholeWord(String text, String needle, int from) {
+        if (needle.isEmpty()) {
+            return -1;
+        }
+        int len = needle.length();
+        for (int idx = text.indexOf(needle, from); idx >= 0; idx = text.indexOf(needle, idx + 1)) {
+            boolean leftOk = idx == 0
+                    || !(isWordChar(text.charAt(idx - 1)) && isWordChar(needle.charAt(0)));
+            int after = idx + len;
+            boolean rightOk = after >= text.length()
+                    || !(isWordChar(needle.charAt(len - 1)) && isWordChar(text.charAt(after)));
+            if (leftOk && rightOk) {
+                return idx;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isWordChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
     }
 
     private static String escapeAttr(String s) {
@@ -239,6 +277,8 @@ final class RefTargets {
             doc.insertString(start, wrapped, null);
             return start + wrapped.length();
         }
+
+        public int searchAnchor() { return end; }
     }
 
     private static final class AuthorWrapTarget implements WrapTarget {
@@ -268,6 +308,8 @@ final class RefTargets {
             ctrl.surroundInFragment(frag.toString(), start, end - 1);
             return -1; // "next occurrence" is Text-mode only
         }
+
+        public int searchAnchor() { return -1; } // Author mode: "next occurrence" unsupported
     }
 
     private static String localName(String qName) {
