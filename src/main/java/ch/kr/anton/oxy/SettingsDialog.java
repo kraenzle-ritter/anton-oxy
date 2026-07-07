@@ -37,6 +37,11 @@ final class SettingsDialog {
         mappingArea.setLineWrap(false);
         JScrollPane mappingScroll = new JScrollPane(mappingArea);
         mappingScroll.setPreferredSize(new Dimension(280, 90));
+        JCheckBox scan = new JCheckBox(
+                "Nach weiteren Vorkommen im Text fragen (Akteure/Orte, Text-Modus)",
+                config.isScanOccurrences());
+        JSpinner context = new JSpinner(new SpinnerNumberModel(
+                config.getContextChars(), Config.CONTEXT_MIN, Config.CONTEXT_MAX, 10));
 
         JPanel form = new JPanel(new GridBagLayout());
         form.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
@@ -62,6 +67,11 @@ final class SettingsDialog {
         c.gridx = 1; c.gridy = y++; c.fill = GridBagConstraints.HORIZONTAL;
         form.add(insecure, c);
 
+        addRow(form, c, y++, "Vorschau-Kontext (Zeichen/Seite):", context);
+
+        c.gridx = 1; c.gridy = y++; c.weightx = 1; c.fill = GridBagConstraints.HORIZONTAL;
+        form.add(scan, c);
+
         c.gridx = 0; c.gridy = y; c.gridwidth = 2;
         form.add(new JLabel("<html><small>Template placeholders: "
                 + "<code>{fullId}</code> <code>{slug}</code> <code>{register}</code> "
@@ -78,6 +88,8 @@ final class SettingsDialog {
             config.setAttribute(attrField.getText().trim());
             config.setTemplate(templateField.getText().trim());
             config.setMappingRaw(mappingArea.getText());
+            config.setScanOccurrences(scan.isSelected());
+            config.setContextChars(((Number) context.getValue()).intValue());
             return true;
         }
         return false;

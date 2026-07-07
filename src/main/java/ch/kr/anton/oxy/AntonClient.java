@@ -95,9 +95,49 @@ final class AntonClient {
             String label = firstNonEmpty(m, "fullname", "name", "label");
             String type = firstNonEmpty(m, "authority_type", "type");
             String detail = "places".equals(register) ? placeDetail(m) : "";
-            out.add(new AntonEntity(id, fullId, label, type, detail, register));
+            out.add(new AntonEntity(id, fullId, label, type, detail, register, names(m)));
         }
         return out;
+    }
+
+    /**
+     * Raw name strings for the record, used to find further occurrences of the same entity
+     * in the document. Collects {@code name}, {@code fullname}, {@code alternative_names},
+     * {@code variants} and {@code abbreviations}; array values are taken element-wise, single
+     * strings are kept intact (the "Nachname, Vorname" split happens later in {@link Occurrences}).
+     */
+    @SuppressWarnings("rawtypes")
+    private List<String> names(Map m) {
+        List<String> out = new ArrayList<String>();
+        addNames(out, m.get("name"));
+        addNames(out, m.get("fullname"));
+        addNames(out, m.get("alternative_names"));
+        addNames(out, m.get("variants"));
+        addNames(out, m.get("abbreviations"));
+        return out;
+    }
+
+    @SuppressWarnings("rawtypes")
+    private void addNames(List<String> out, Object v) {
+        if (v == null) {
+            return;
+        }
+        if (v instanceof List) {
+            for (Object o : (List) v) {
+                addName(out, str(o));
+            }
+        } else {
+            addName(out, str(v));
+        }
+    }
+
+    private void addName(List<String> out, String s) {
+        if (s != null) {
+            s = s.trim();
+            if (!s.isEmpty() && !out.contains(s)) {
+                out.add(s);
+            }
+        }
     }
 
     @SuppressWarnings("rawtypes")

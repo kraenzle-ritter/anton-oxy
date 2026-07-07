@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import javax.swing.text.AbstractDocument;
 import javax.swing.text.Document;
 
 import ro.sync.ecss.extensions.api.AuthorDocumentController;
@@ -245,6 +246,77 @@ final class RefTargets {
 
     private static boolean isWordChar(char c) {
         return Character.isLetterOrDigit(c) || c == '_';
+    }
+
+    // --- batch occurrence tagging (Text mode) ------------------------------
+
+    /** The underlying text-mode {@link Document}, or null if the page is not a Text page. */
+    static Document textDocument(WSEditor editor) {
+        if (editor == null) {
+            return null;
+        }
+        WSEditorPage page = editor.getCurrentPage();
+        if (page instanceof WSTextEditorPage) {
+            return ((WSTextEditorPage) page).getDocument();
+        }
+        return null;
+    }
+
+    /** Assemble a start tag {@code <element attr="value">} with an escaped attribute value. */
+    private static String startTag(String element, String attr, String value) {
+        return "<" + element + " " + attr + "=\"" + escapeAttr(value) + "\">";
+    }
+
+    /** Wrap {@code doc[start, end)} in {@code <element attr="value">…</element>}. */
+    static void wrapRange(Document doc, int start, int end, String element,
+                          String attr, String value) throws Exception {
+        // Insert the end tag first so the start offset stays valid.
+        doc.insertString(end, "</" + element + ">", null);
+        doc.insertString(start, startTag(element, attr, value), null);
+    }
+
+    /**
+     * Wrap several non-overlapping ranges at once, as a single edit over the covering span
+     * {@code [ranges[0].start, ranges[last].end)}, so the whole batch collapses into one
+     * undoable operation in the editor instead of two inserts per range.
+     *
+     * <p>{@code ranges} is an array of {@code {start, end}} pairs that must be sorted
+     * ascending by start and must not overlap (as produced by {@link Occurrences}).</p>
+     */
+    static void wrapRanges(Document doc, int[][] ranges, String element,
+                           String attr, String value) throws Exception {
+        if (ranges == null || ranges.length == 0) {
+            return;
+        }
+        if (ranges.length == 1) {
+            wrapRange(doc, ranges[0][0], ranges[0][1], element, attr, value);
+            return;
+        }
+        int lo = ranges[0][0];
+        int hi = ranges[ranges.length - 1][1];
+        String span = doc.getText(lo, hi - lo);
+        String open = startTag(element, attr, value);
+        String close = "</" + element + ">";
+        StringBuilder b = new StringBuilder(
+                span.length() + ranges.length * (open.length() + close.length()));
+        int cursor = 0; // offset within span already copied out
+        for (int[] r : ranges) {
+            int s = r[0] - lo;
+            int e = r[1] - lo;
+            b.append(span, cursor, s); // text before this occurrence
+            b.append(open);
+            b.append(span, s, e);      // the base name itself
+            b.append(close);
+            cursor = e;
+        }
+        b.append(span, cursor, span.length()); // remaining tail
+        String replacement = b.toString();
+        if (doc instanceof AbstractDocument) {
+            ((AbstractDocument) doc).replace(lo, hi - lo, replacement, null);
+        } else {
+            doc.remove(lo, hi - lo);
+            doc.insertString(lo, replacement, null);
+        }
     }
 
     private static String escapeAttr(String s) {

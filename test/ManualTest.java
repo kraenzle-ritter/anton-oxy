@@ -30,6 +30,8 @@ public class ManualTest {
         testWholeWord();
         testDateGuess();
         testConfig();
+        testOccurrences();
+        testWrapRanges();
         System.out.println(failures == 0 ? "\nALL TESTS PASSED" : "\n" + failures + " TEST(S) FAILED");
         if (failures > 0) {
             System.exit(1);
@@ -376,6 +378,114 @@ public class ManualTest {
         if (t == byte.class) return (byte) 0;
         if (t == char.class) return (char) 0;
         return null;
+    }
+
+    // --- Occurrences: term derivation + scanning ----------------------------
+
+    private static void testOccurrences() {
+        // term derivation: "Nachname, Vorname" -> surname + "Vorname Nachname"
+        AntonEntity barth = new AntonEntity(1, "kr-actors-1", "Barth, Karl", "Person", "", "actors",
+                java.util.Arrays.asList("Barth, Karl"));
+        java.util.List<String> terms = Occurrences.terms(barth, "Karl Barth");
+        check("terms contain surname", "true", String.valueOf(terms.contains("Barth")));
+        check("terms contain full", "true", String.valueOf(terms.contains("Karl Barth")));
+        check("terms longest first", "Karl Barth", terms.get(0));
+
+        java.util.Set<String> skip = new java.util.HashSet<String>(
+                java.util.Arrays.asList("persName", "orgName", "placeName"));
+
+        // scan: skip the already-tagged persName, match "Barths" (genitive) and "Barth."
+        String doc = "<p><persName ref=\"kr-actors-1\">Karl Barth</persName> schrieb. "
+                + "Barths Brief an Barth. Ende.</p>";
+        java.util.List<Occurrences.Match> ms = Occurrences.find(doc, skip, terms);
+        check("occurrences found", "2", String.valueOf(ms.size()));
+        boolean allBarth = true;
+        for (Occurrences.Match m : ms) {
+            if (!doc.substring(m.start, m.end).equals("Barth")) {
+                allBarth = false;
+            }
+        }
+        check("genitive wraps base only", "true", String.valueOf(allBarth));
+
+        // without the skip set, the occurrence inside <persName> is also found (3 total)
+        java.util.List<Occurrences.Match> msNoSkip =
+                Occurrences.find(doc, new java.util.HashSet<String>(), terms);
+        check("no-skip finds tagged too", "3", String.valueOf(msNoSkip.size()));
+
+        // "Barthold" must NOT match "Barth" (letter after base, not a genitive s)
+        String doc2 = "<p>Barthold Meyer und Barths Werk.</p>";
+        java.util.List<Occurrences.Match> ms2 = Occurrences.find(doc2, skip, terms);
+        check("no false match in longer word", "1", String.valueOf(ms2.size()));
+        check("matched the genitive one", "Barth", doc2.substring(ms2.get(0).start, ms2.get(0).end));
+
+        // name variants from the API feed the term list (here: an alternative name)
+        AntonEntity thur = new AntonEntity(2, "kr-actors-2", "Eduard Thurneysen", "Person", "",
+                "actors", java.util.Arrays.asList("Eduard Thurneysen", "Thüneysen"));
+        java.util.List<String> tThur = Occurrences.terms(thur, "Thurneysen");
+        check("variant becomes a term", "true", String.valueOf(tThur.contains("Thüneysen")));
+
+        // place genitive
+        AntonEntity basel = new AntonEntity(5, "kr-places-5", "Basel", "Stadt", "", "places",
+                java.util.Arrays.asList("Basel"));
+        String doc3 = "<p>in Basel und Basels Umgebung</p>";
+        java.util.List<Occurrences.Match> ms3 =
+                Occurrences.find(doc3, skip, Occurrences.terms(basel, "Basel"));
+        check("place occurrences", "2", String.valueOf(ms3.size()));
+
+        // configurable preview context: a wider window shows more surrounding text and
+        // never cuts a word at the edge (the base name stays wrapped in «…»).
+        String doc4 = "<p>Weiterhin korrespondierte Emil Brunner ausfuehrlich mit Karl Barth "
+                + "ueber die natuerliche Theologie ihrer Zeit.</p>";
+        java.util.List<String> tBarth = Occurrences.terms(barth, "Karl Barth");
+        String narrow = Occurrences.find(doc4, skip, tBarth, 20).get(0).snippet;
+        String wide = Occurrences.find(doc4, skip, tBarth, 120).get(0).snippet;
+        check("wide context is longer", "true", String.valueOf(wide.length() > narrow.length()));
+        check("base name wrapped", "true", String.valueOf(wide.contains("«Karl Barth»")));
+        check("no cut word at edge", "true",
+                String.valueOf(wide.contains("Weiterhin") && wide.contains("Zeit")));
+
+        // dialog row rendering: base name inside «…» becomes bold, guillemets dropped, HTML-safe
+        String row = OccurrenceDialog.htmlRow("… mit «Karl Barth» ueber …");
+        check("row is html", "true", String.valueOf(row.startsWith("<html>") && row.endsWith("</html>")));
+        check("row bolds base", "true", String.valueOf(row.contains("<b>Karl Barth</b>")));
+        check("row drops guillemets", "true", String.valueOf(!row.contains("«") && !row.contains("»")));
+        check("row escapes markup", "true",
+                String.valueOf(OccurrenceDialog.htmlRow("a < b «X» &").contains("&lt; b <b>X</b> &amp;")));
+    }
+
+    // --- RefTargets: batch wrapping (single covering-span edit) --------------
+
+    private static void testWrapRanges() throws Exception {
+        // two occurrences wrapped in one covering-span edit, offsets stay correct
+        PlainDocument doc = new PlainDocument();
+        doc.insertString(0, "Karl Barth und Barth.", null);
+        RefTargets.wrapRanges(doc, new int[][] { {0, 10}, {15, 20} },
+                "persName", "ref", "kr-actors-1");
+        String out = doc.getText(0, doc.getLength());
+        String expect = "<persName ref=\"kr-actors-1\">Karl Barth</persName> und "
+                + "<persName ref=\"kr-actors-1\">Barth</persName>.";
+        check("wrapRanges batch text", expect, out);
+
+        // batch result matches wrapping each range on its own (from the end)
+        PlainDocument seq = new PlainDocument();
+        seq.insertString(0, "Karl Barth und Barth.", null);
+        RefTargets.wrapRange(seq, 15, 20, "persName", "ref", "kr-actors-1");
+        RefTargets.wrapRange(seq, 0, 10, "persName", "ref", "kr-actors-1");
+        check("batch equals sequential", seq.getText(0, seq.getLength()), out);
+
+        // single range still wraps correctly (delegates to wrapRange)
+        PlainDocument one = new PlainDocument();
+        one.insertString(0, "in Basel heute", null);
+        RefTargets.wrapRanges(one, new int[][] { {3, 8} }, "placeName", "ref", "kr-places-5");
+        check("wrapRanges single", "in <placeName ref=\"kr-places-5\">Basel</placeName> heute",
+                one.getText(0, one.getLength()));
+
+        // attribute value is XML-escaped in the generated start tags
+        PlainDocument esc = new PlainDocument();
+        esc.insertString(0, "X", null);
+        RefTargets.wrapRanges(esc, new int[][] { {0, 1} }, "persName", "ref", "a&b<c");
+        check("wrapRanges escapes value", "<persName ref=\"a&amp;b&lt;c\">X</persName>",
+                esc.getText(0, esc.getLength()));
     }
 
     // --- assertions ---------------------------------------------------------

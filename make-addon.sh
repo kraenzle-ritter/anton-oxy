@@ -12,7 +12,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 OXY_MIN="22.0"
 ID="ch.kr.anton.oxy"
 NAME="anton-oxy"

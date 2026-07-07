@@ -59,6 +59,22 @@ The next-occurrence search matches **whole words only**: tagging `Schaan` skips 
 match but you don’t want to tag it, **Überspringen** moves on to the next occurrence
 without writing anything — so a false positive never forces you to abort serial tagging.
 
+**Tag further occurrences in one batch.** After a plain **Einfügen** of an actor or place
+reference (Text mode), the plugin scans the rest of the document for other mentions of the
+same entity and offers them in a checklist — each shown with its surrounding context, the
+name to be wrapped in **bold**. Tick the ones you want and they are all wrapped in the same
+element with the same reference as **a single undo step**. The scan
+- derives search terms from the tagged text *and* the name variants Anton returned
+  (`name`, `alternative_names`, `variants`, `abbreviations`), including the bare surname of a
+  “Nachname, Vorname” entry;
+- accepts a German **genitive ending** (`Barths`, `Marx'`) and leaves the ending outside the
+  element, as TEI convention wants;
+- **skips text already inside a mapped element**, so nothing gets double-tagged.
+
+This is the batch counterpart to serial *Einfügen & weiter*: it only fires on a plain insert,
+never when you chose to step through occurrences yourself. Switch it off, or widen the preview
+context, under **Anton-Einstellungen…** (see below).
+
 **Tagging dates.** A separate **Datum** action (toolbar button, menu **Anton → Datum
 taggen**, or **Ctrl+Shift+D**) wraps a selected date in `<date when="…">`. It best-effort
 normalises the selection to an ISO 8601 value — `3. Juli 2026`, `03.07.2026` and
@@ -105,7 +121,7 @@ updates). Build the jar once, package the add-on, then install via the oXygen GU
 
 ```bash
 ./build.sh          # compile (set OXYGEN_DIR if oXygen is elsewhere)
-./make-addon.sh     # package add-on  ->  addon/updateSite.xml + dist/anton-oxy-1.2.0.zip
+./make-addon.sh     # package add-on  ->  addon/updateSite.xml + dist/anton-oxy-1.3.0.zip
 # ── or copy straight into the app: ──
 ./install.sh        # copies into "<oXygen>/plugins/anton-oxy"
 ```
@@ -157,6 +173,8 @@ Settings are stored in oXygen’s options.
 | **Target attribute** | Default attribute that receives the id.                                 | `ref` |
 | **ID value template**| Value written into the attribute. Placeholders: `{fullId}` `{slug}` `{register}` `{id}`. | `{fullId}` |
 | **Element → register** | One `element=register` per line (`#` comments allowed). An optional `@attribute` suffix overrides the attribute for that element. | see below |
+| **Vorschau-Kontext (Zeichen/Seite)** | Characters shown left and right of the base name in the “further occurrences” preview (words at the edge are never cut). | `60` |
+| **Nach weiteren Vorkommen fragen** | After tagging an actor/place, offer to also tag its further occurrences in the document (Text mode). | on |
 | **Accept self-signed certs** | Lenient TLS for local DDEV/mkcert hosts (per-connection only). Leave off for a URL with a valid certificate. | off |
 
 Default mapping (editable):
@@ -186,8 +204,9 @@ ID value template:  #{fullId}
 
 Offline sanity checks (no network): JSON parsing, Text-mode attribute insert/replace
 with attribute preservation and nesting, Wrap &amp; Tag (element wrapping + attribute
-escaping), next-occurrence selection, register mapping, per-element attribute overrides
-and id-value templates.
+escaping), next-occurrence selection, register mapping, per-element attribute overrides,
+id-value templates, further-occurrence term derivation + genitive-aware scanning, and
+batch covering-span wrapping.
 
 ## Project structure
 
@@ -200,11 +219,13 @@ addon/updateSite.xml                      add-on descriptor (generated)
 src/main/java/ch/kr/anton/oxy/
   AntonOxyPlugin.java                      plugin entry point
   AntonOxyPluginExtension.java             toolbar/menu + action
-  RefTargets.java                          locate element + write attribute (Text & Author)
+  RefTargets.java                          locate element + write attribute (Text & Author), batch wrap
   SearchDialog.java                        live search dialog
-  SettingsDialog.java                      settings (URL / attribute / template / mapping / TLS)
+  SettingsDialog.java                      settings (URL / attribute / template / mapping / scan / TLS)
+  Occurrences.java                         find further occurrences (terms + genitive-aware scan)
+  OccurrenceDialog.java                    checklist to pick which further occurrences to tag
   AntonClient.java                         HTTP client for /api/{register}
-  AntonEntity.java  Json.java  Config.java
+  AntonEntity.java  Json.java  Config.java  DateDialog.java
 test/ManualTest.java                       offline tests
 ```
 

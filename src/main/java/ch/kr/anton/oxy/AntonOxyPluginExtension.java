@@ -12,6 +12,7 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.KeyStroke;
+import javax.swing.text.Document;
 
 import ro.sync.exml.plugin.workspace.WorkspaceAccessPluginExtension;
 import ro.sync.exml.workspace.api.PluginWorkspace;
@@ -215,17 +216,24 @@ public class AntonOxyPluginExtension
 
         String surface;
         int anchor;
+        String element;
+        String attr;
+        String value = config.formatRef(chosen);
         try {
-            String value = config.formatRef(chosen);
             if (wrapMode) {
                 surface = wrap.selectedText();
-                anchor = wrap.wrap(dlg.chosenElement(), dlg.chosenAttr(), value);
-                lastElement = dlg.chosenElement();
+                element = dlg.chosenElement();
+                attr = dlg.chosenAttr();
+                anchor = wrap.wrap(element, attr, value);
+                lastElement = element;
             } else {
                 surface = existing.currentText();
+                element = existing.elementName();
+                Config.Target t = config.getTargets().get(element);
+                attr = t != null ? t.attribute : config.getAttribute();
                 existing.writeRef(value);
                 anchor = existing.afterOffset();
-                lastElement = existing.elementName();
+                lastElement = element;
             }
         } catch (Exception ex) {
             error("Konnte Referenz nicht setzen: " + ex.getMessage());
@@ -233,9 +241,91 @@ public class AntonOxyPluginExtension
         }
 
         if (!dlg.wantsNext()) {
+            // The user chose a plain insert (not "Einfügen & weiter"): offer to also tag the
+            // remaining occurrences of this actor/place in one batch (Text mode only).
+            maybeTagFurther(editor, chosen, surface, element, attr, value);
             return false;
         }
         return continueNext(editor, surface, anchor);
+    }
+
+    /**
+     * After a reference was set, scan the rest of the document (Text mode) for further
+     * occurrences of the same actor/place — including genitive endings and the name variants
+     * the API returned — and let the user tick which ones to tag as the same element.
+     * A no-op in Author mode, for keywords, or when the feature is switched off.
+     */
+    private void maybeTagFurther(WSEditor editor, AntonEntity chosen, String markedText,
+                                 String element, String attr, String value) {
+        if (!config.isScanOccurrences()) {
+            return;
+        }
+        if (!"actors".equals(chosen.register) && !"places".equals(chosen.register)) {
+            return; // occurrence search only makes sense for names, not keywords
+        }
+        Document doc = RefTargets.textDocument(editor);
+        if (doc == null) {
+            return; // not a Text page — skip silently
+        }
+        String xml;
+        try {
+            xml = doc.getText(0, doc.getLength());
+        } catch (Exception e) {
+            return;
+        }
+        java.util.List<String> terms = Occurrences.terms(chosen, markedText);
+        if (terms.isEmpty()) {
+            return;
+        }
+        // Skip text already inside any mapped element, so nothing gets double-tagged.
+        java.util.List<Occurrences.Match> matches =
+                Occurrences.find(xml, config.getTargets().keySet(), terms, config.getContextChars());
+        if (matches.isEmpty()) {
+            return;
+        }
+        String label = (chosen.label != null && !chosen.label.isEmpty()) ? chosen.label : markedText;
+        java.util.List<Occurrences.Match> picked =
+                OccurrenceDialog.choose(activeWindow(), label, element, matches);
+        if (picked == null || picked.isEmpty()) {
+            return;
+        }
+        applyOccurrences(doc, picked, element, attr, value);
+    }
+
+    /**
+     * Wrap the chosen occurrences in one edit over the covering span, so the whole batch is a
+     * single undo step. Falls back to wrapping them one by one (from the end, so earlier
+     * offsets stay valid) if the combined edit fails.
+     */
+    private void applyOccurrences(Document doc, java.util.List<Occurrences.Match> matches,
+                                  String element, String attr, String value) {
+        java.util.List<Occurrences.Match> sorted =
+                new java.util.ArrayList<Occurrences.Match>(matches);
+        sorted.sort((a, b) -> a.start - b.start); // ascending for the covering-span rebuild
+
+        int done = 0;
+        try {
+            int[][] ranges = new int[sorted.size()][];
+            for (int i = 0; i < sorted.size(); i++) {
+                ranges[i] = new int[] { sorted.get(i).start, sorted.get(i).end };
+            }
+            RefTargets.wrapRanges(doc, ranges, element, attr, value);
+            done = sorted.size();
+        } catch (Exception combined) {
+            // fall back to per-occurrence wrapping, working from the end so offsets stay valid
+            for (int i = sorted.size() - 1; i >= 0; i--) {
+                Occurrences.Match m = sorted.get(i);
+                try {
+                    RefTargets.wrapRange(doc, m.start, m.end, element, attr, value);
+                    done++;
+                } catch (Exception ex) {
+                    // skip this occurrence, keep going
+                }
+            }
+        }
+        if (done > 0) {
+            info(done + (done == 1 ? " weiteres Vorkommen" : " weitere Vorkommen") + " ausgezeichnet.");
+        }
     }
 
     /**
