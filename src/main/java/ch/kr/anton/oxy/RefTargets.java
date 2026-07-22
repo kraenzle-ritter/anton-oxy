@@ -45,6 +45,12 @@ final class RefTargets {
         String currentRef();
         /** Write/replace the configured attribute with {@code value}. */
         void writeRef(String value) throws Exception;
+        /** Write/replace the given {@code attr} with {@code value} (for cross-register retagging). */
+        void writeRef(String attr, String value) throws Exception;
+        /** Rename the element to {@code elementName} (no-op if already named so). */
+        void renameElementTo(String elementName) throws Exception;
+        /** Remove attribute {@code name} if present (no-op otherwise). */
+        void removeAttribute(String name) throws Exception;
         /**
          * Document offset from which a "next occurrence" search may continue so it
          * does not re-match the text just tagged (Text mode), or {@code -1} when the
@@ -162,11 +168,40 @@ final class RefTargets {
             if (sel == null || sel.trim().isEmpty()) {
                 return null;
             }
+            // Map the raw selection offsets to valid content offsets. With pretty-printed mixed
+            // content (e.g. a name inside an indented <note>/<bibl>) the raw offsets point at a
+            // different range, so surroundInFragment would wrap the wrong text ("one line below").
+            // This is the same step oXygen's own surround operations perform before wrapping.
+            try {
+                int[] bal = page.getBalancedSelection(start, end);
+                if (bal != null && bal.length == 2 && bal[1] > bal[0]) {
+                    start = bal[0];
+                    end = bal[1];
+                }
+            } catch (Exception ignore) {
+                // keep raw offsets
+            }
             AuthorDocumentController ctrl = page.getDocumentController();
             return new AuthorWrapTarget(ctrl, start, end, sel, namespaceAt(ctrl, start));
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * Map a raw editor selection {@code [rawStart, rawEnd)} to a balanced start offset that is
+     * valid in the {@link AuthorDocumentController} content model. Falls back to {@code rawStart}.
+     */
+    private static int balancedStart(WSAuthorEditorPage page, int rawStart, int rawEnd) {
+        try {
+            int[] bal = page.getBalancedSelection(rawStart, Math.max(rawStart, rawEnd));
+            if (bal != null && bal.length == 2) {
+                return bal[0];
+            }
+        } catch (Exception ignore) {
+            // fall through
+        }
+        return rawStart;
     }
 
     /** Nearest non-empty namespace at {@code offset}, so a wrapped element stays in it. */
@@ -397,14 +432,24 @@ final class RefTargets {
     private static RefTarget locateAuthor(WSAuthorEditorPage page, Map<String, Config.Target> targets) {
         try {
             AuthorDocumentController ctrl = page.getDocumentController();
-            int offset = page.getSelectionStart();
+            int offset = balancedStart(page, page.getSelectionStart(), page.getSelectionEnd());
+            // getSelectedText() reports the visual selection reliably; ctrl.getText on the node's
+            // offsets can read the wrong region with pretty-printed mixed content.
+            String selected = null;
+            try {
+                if (page.hasSelection()) {
+                    selected = page.getSelectedText();
+                }
+            } catch (Exception ignore) {
+                // fall back to the element's own text
+            }
             AuthorNode node = ctrl.getNodeAtOffset(offset);
             while (node != null) {
                 if (node instanceof AuthorElement) {
                     String ln = localName(node.getName());
                     Config.Target t = targets.get(ln);
                     if (t != null) {
-                        return new AuthorRefTarget(ctrl, (AuthorElement) node, ln, t.register, t.attribute);
+                        return new AuthorRefTarget(ctrl, (AuthorElement) node, ln, t.register, t.attribute, selected);
                     }
                 }
                 node = node.getParent();
@@ -421,20 +466,25 @@ final class RefTargets {
         private final String name;
         private final String register;
         private final String attr;
+        private final String selectedText; // reliable visual selection, or null
 
         AuthorRefTarget(AuthorDocumentController ctrl, AuthorElement el, String name,
-                        String register, String attr) {
+                        String register, String attr, String selectedText) {
             this.ctrl = ctrl;
             this.el = el;
             this.name = name;
             this.register = register;
             this.attr = attr;
+            this.selectedText = selectedText;
         }
 
         public String register() { return register; }
         public String elementName() { return name; }
 
         public String currentText() {
+            if (selectedText != null && !selectedText.trim().isEmpty()) {
+                return collapse(selectedText);
+            }
             try {
                 int start = el.getStartOffset();
                 int len = el.getEndOffset() - start;
@@ -451,6 +501,20 @@ final class RefTargets {
 
         public void writeRef(String value) {
             ctrl.setAttribute(attr, new AttrValue(value), el);
+        }
+
+        public void writeRef(String attrName, String value) {
+            ctrl.setAttribute(attrName, new AttrValue(value), el);
+        }
+
+        public void renameElementTo(String elementName) {
+            if (elementName != null && !elementName.equals(localName(el.getName()))) {
+                ctrl.renameElement(el, elementName);
+            }
+        }
+
+        public void removeAttribute(String attrName) {
+            ctrl.removeAttribute(attrName, el);
         }
 
         public int afterOffset() { return -1; } // Author mode: "next occurrence" unsupported
@@ -582,6 +646,84 @@ final class RefTargets {
             String newTag = buildTag(tag, value);
             int len = tagEnd - tagStart + 1;
             doc.remove(tagStart, len);
+            doc.insertString(tagStart, newTag, null);
+        }
+
+        // The methods below re-read the start tag live from the document (rather than the cached
+        // snapshot), so they compose correctly when renaming and re-attributing in sequence.
+
+        public void writeRef(String attrName, String value) throws Exception {
+            String live = liveStartTag();
+            boolean selfClose = live.endsWith("/>");
+            String body = live.substring(1, selfClose ? live.length() - 2 : live.length() - 1);
+            Pattern p = Pattern.compile(
+                    "(?s)\\s" + Pattern.quote(attrName) + "\\s*=\\s*(\"[^\"]*\"|'[^']*')");
+            String attrText = " " + attrName + "=\"" + value + "\"";
+            Matcher m = p.matcher(body);
+            if (m.find()) {
+                body = body.substring(0, m.start()) + attrText + body.substring(m.end());
+            } else {
+                Matcher nm = Pattern.compile("^(\\s*[\\w:.\\-]+)").matcher(body);
+                if (nm.find()) {
+                    body = body.substring(0, nm.end()) + attrText + body.substring(nm.end());
+                } else {
+                    body = body + attrText;
+                }
+            }
+            replaceStartTag("<" + body + (selfClose ? "/>" : ">"));
+        }
+
+        public void renameElementTo(String newName) throws Exception {
+            if (newName == null || newName.equals(name)) {
+                return;
+            }
+            String text = doc.getText(0, doc.getLength());
+            int close = text.indexOf('>', tagStart);
+            if (close < 0) {
+                throw new Exception("Kein Tag-Ende gefunden.");
+            }
+            boolean selfClose = text.charAt(close - 1) == '/';
+            // Rewrite the matching end tag first (higher offset), so renaming the start-tag name
+            // below does not shift the end-tag offset computed here.
+            if (!selfClose) {
+                int endTag = indexOfCloseTag(text, name, close);
+                if (endTag >= 0) {
+                    int endClose = text.indexOf('>', endTag);
+                    doc.remove(endTag, endClose - endTag + 1);
+                    doc.insertString(endTag, "</" + newName + ">", null);
+                }
+            }
+            doc.remove(tagStart + 1, name.length());
+            doc.insertString(tagStart + 1, newName, null);
+        }
+
+        public void removeAttribute(String attrName) throws Exception {
+            String live = liveStartTag();
+            Pattern p = Pattern.compile(
+                    "(?s)\\s" + Pattern.quote(attrName) + "\\s*=\\s*(\"[^\"]*\"|'[^']*')");
+            Matcher m = p.matcher(live);
+            if (!m.find()) {
+                return;
+            }
+            replaceStartTag(live.substring(0, m.start()) + live.substring(m.end()));
+        }
+
+        private String liveStartTag() throws Exception {
+            String text = doc.getText(0, doc.getLength());
+            int close = text.indexOf('>', tagStart);
+            if (close < 0) {
+                throw new Exception("Kein Tag-Ende gefunden.");
+            }
+            return text.substring(tagStart, close + 1);
+        }
+
+        private void replaceStartTag(String newTag) throws Exception {
+            String text = doc.getText(0, doc.getLength());
+            int close = text.indexOf('>', tagStart);
+            if (close < 0) {
+                throw new Exception("Kein Tag-Ende gefunden.");
+            }
+            doc.remove(tagStart, close - tagStart + 1);
             doc.insertString(tagStart, newTag, null);
         }
 

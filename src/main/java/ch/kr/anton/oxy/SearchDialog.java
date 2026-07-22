@@ -247,14 +247,18 @@ final class SearchDialog extends JDialog {
         return result;
     }
 
-    /** Wrap mode: the element the selection should be wrapped in (null in edit mode). */
+    /**
+     * The element implied by the register chosen in the dialog (e.g. persName / placeName /
+     * bibl). Set in both wrap and edit mode — in edit mode it drives retagging an existing
+     * element when the user picks an entity from a different register. May be null.
+     */
     String chosenElement() {
-        return (wrapMode && chosenChoice != null) ? chosenChoice.element : null;
+        return chosenChoice != null ? chosenChoice.element : null;
     }
 
-    /** Wrap mode: the attribute that receives the reference (null in edit mode). */
+    /** The attribute that receives the reference for the chosen register, or null. */
     String chosenAttr() {
-        return (wrapMode && chosenChoice != null) ? chosenChoice.attr : null;
+        return chosenChoice != null ? chosenChoice.attr : null;
     }
 
     /** True if the editor asked to continue with the next occurrence after inserting. */

@@ -10,7 +10,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
 
 OXYGEN_DIR="${OXYGEN_DIR:-/Applications/Oxygen XML Editor}"
-VERSION="1.3.0"
+VERSION="1.3.1"
 JAR="lib/anton-oxy-${VERSION}.jar"
 TARGET="$OXYGEN_DIR/plugins/anton-oxy"
 

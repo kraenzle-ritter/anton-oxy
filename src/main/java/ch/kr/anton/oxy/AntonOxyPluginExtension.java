@@ -228,10 +228,27 @@ public class AntonOxyPluginExtension
                 lastElement = element;
             } else {
                 surface = existing.currentText();
-                element = existing.elementName();
-                Config.Target t = config.getTargets().get(element);
-                attr = t != null ? t.attribute : config.getAttribute();
-                existing.writeRef(value);
+                String oldElement = existing.elementName();
+                Config.Target oldT = config.getTargets().get(oldElement);
+                String oldAttr = oldT != null ? oldT.attribute : config.getAttribute();
+                String wantElement = dlg.chosenElement();
+                String newAttr = dlg.chosenAttr();
+                if (wantElement != null && !wantElement.equals(oldElement)) {
+                    // Picked entity belongs to a different element (e.g. a place chosen on an
+                    // existing persName): retag the element and drop the now-stale attribute.
+                    existing.renameElementTo(wantElement);
+                    String useAttr = newAttr != null ? newAttr : oldAttr;
+                    if (!useAttr.equals(oldAttr)) {
+                        existing.removeAttribute(oldAttr);
+                    }
+                    existing.writeRef(useAttr, value);
+                    element = wantElement;
+                    attr = useAttr;
+                } else {
+                    existing.writeRef(value);
+                    element = oldElement;
+                    attr = oldAttr;
+                }
                 anchor = existing.afterOffset();
                 lastElement = element;
             }
