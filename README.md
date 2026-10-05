@@ -6,8 +6,8 @@ TEI element under the caret.
 
 It issues **one `?search=` request per query** (`GET /api/actors`,
 `GET /api/places`, `GET /api/keywords`) — it never downloads a whole register. Anton
-returns the full id (including the project slug) ready to use, and the search
-endpoints are public (no authentication).
+returns the full id (including the project slug) ready to use. A public archive needs
+no authentication; one that is not public needs an API token (see below).
 
 Element→register mapping, the target attribute, the id value template and the base URL
 are all **configurable**, so the plugin works for any Anton tenant and tagging scheme.
@@ -121,7 +121,7 @@ updates). Build the jar once, package the add-on, then install via the oXygen GU
 
 ```bash
 ./build.sh          # compile (set OXYGEN_DIR if oXygen is elsewhere)
-./make-addon.sh     # package add-on  ->  addon/updateSite.xml + dist/anton-oxy-1.3.1.zip
+./make-addon.sh     # package add-on  ->  addon/updateSite.xml + dist/anton-oxy-1.4.0.zip
 # ── or copy straight into the app: ──
 ./install.sh        # copies into "<oXygen>/plugins/anton-oxy"
 ```
@@ -169,6 +169,7 @@ Settings are stored in oXygen’s options.
 | Setting              | Meaning                                                                 | Default |
 | -------------------- | ----------------------------------------------------------------------- | ------- |
 | **Anton base URL**   | Anton instance/tenant URL.                                              | `https://kr.anton.ch` |
+| **API token**        | Only for an archive that is not public, sent as `Authorization: Bearer`. Leave empty otherwise. | empty |
 | **Hits per search**  | Page size for the search request.                                       | `30` |
 | **Target attribute** | Default attribute that receives the id.                                 | `ref` |
 | **ID value template**| Value written into the attribute. Placeholders: `{fullId}` `{slug}` `{register}` `{id}`. | `{fullId}` |
@@ -176,6 +177,13 @@ Settings are stored in oXygen’s options.
 | **Vorschau-Kontext (Zeichen/Seite)** | Characters shown left and right of the base name in the “further occurrences” preview (words at the edge are never cut). | `60` |
 | **Nach weiteren Vorkommen fragen** | After tagging an actor/place, offer to also tag its further occurrences in the document (Text mode). | on |
 | **Accept self-signed certs** | Lenient TLS for local DDEV/mkcert hosts (per-connection only). Leave off for a URL with a valid certificate. | off |
+
+### Archives that are not public
+
+Since Anton v0.100.1 an archive that is not public answers `/api/actors`, `/api/places`
+and `/api/keywords` only with a token (`HTTP 401 … This archive is not public`).
+Create a token in Anton (user administration → API tokens) and enter it under
+**API token**. A public archive needs no token.
 
 Default mapping (editable):
 

@@ -25,8 +25,9 @@ import javax.net.ssl.X509TrustManager;
  *
  * <p>Performs a live {@code GET {base}/api/{register}?search=...&amp;format=json}
  * for every query (this is the whole point of the plugin — it does NOT bulk-download
- * the full register the way the older zbz approach did). The search endpoints are
- * public, so no authentication is sent.</p>
+ * the full register the way the older zbz approach did). A public archive answers
+ * without authentication; a closed one wants a token, sent as
+ * {@code Authorization: Bearer} (Anton accepts it nowhere else).</p>
  */
 final class AntonClient {
 
@@ -52,12 +53,19 @@ final class AntonClient {
         try {
             con.setRequestMethod("GET");
             con.setRequestProperty("Accept", "application/json");
+            String token = config.getApiToken();
+            if (!token.isEmpty()) {
+                con.setRequestProperty("Authorization", "Bearer " + token);
+            }
             con.setConnectTimeout(8000);
             con.setReadTimeout(15000);
 
             int code = con.getResponseCode();
             InputStream is = (code >= 200 && code < 400) ? con.getInputStream() : con.getErrorStream();
             String body = read(is);
+            if (code == 401) {
+                throw new IOException(unauthorizedHint(token) + "\nAnton HTTP 401 für " + url + "\n" + shorten(body));
+            }
             if (code < 200 || code >= 300) {
                 throw new IOException("Anton HTTP " + code + " für " + url + "\n" + shorten(body));
             }
@@ -65,6 +73,16 @@ final class AntonClient {
         } finally {
             con.disconnect();
         }
+    }
+
+    /**
+     * A 401 means the archive is not public: either no token is set, or the one in the
+     * settings is wrong, expired or belongs to a blocked account.
+     */
+    private static String unauthorizedHint(String token) {
+        return token.isEmpty()
+                ? "Dieses Archiv ist nicht öffentlich. Trage in den anton-oxy-Einstellungen einen API-Token aus Anton ein."
+                : "Anton hat den API-Token abgelehnt (falsch, abgelaufen oder Konto gesperrt). Prüfe ihn in den anton-oxy-Einstellungen.";
     }
 
     @SuppressWarnings({ "unchecked", "rawtypes" })

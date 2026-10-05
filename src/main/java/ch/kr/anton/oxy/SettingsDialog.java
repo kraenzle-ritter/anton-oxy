@@ -11,6 +11,7 @@ import javax.swing.JCheckBox;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.JTextArea;
@@ -18,7 +19,7 @@ import javax.swing.JTextField;
 import javax.swing.SpinnerNumberModel;
 
 /**
- * Settings form: Anton base URL, page size, lenient TLS, the target attribute name,
+ * Settings form: Anton base URL, API token, page size, lenient TLS, the target attribute name,
  * the id value template and the element→register mapping. Persisted via {@link Config}.
  */
 final class SettingsDialog {
@@ -28,6 +29,7 @@ final class SettingsDialog {
     /** @return true if the user saved changes. */
     static boolean edit(Component parent, Config config) {
         JTextField urlField = new JTextField(config.getBaseUrl(), 28);
+        JPasswordField tokenField = new JPasswordField(config.getApiToken(), 28);
         JSpinner perPage = new JSpinner(new SpinnerNumberModel(config.getPerPage(), 5, 200, 5));
         JCheckBox insecure = new JCheckBox(
                 "Accept self-signed / DDEV certificates (local only)", config.isInsecureTls());
@@ -52,6 +54,7 @@ final class SettingsDialog {
 
         int y = 0;
         addRow(form, c, y++, "Anton base URL:", urlField);
+        addRow(form, c, y++, "API token:", tokenField);
         addRow(form, c, y++, "Hits per search:", perPage);
         addRow(form, c, y++, "Target attribute:", attrField);
         addRow(form, c, y++, "ID value template:", templateField);
@@ -76,13 +79,14 @@ final class SettingsDialog {
         form.add(new JLabel("<html><small>Template placeholders: "
                 + "<code>{fullId}</code> <code>{slug}</code> <code>{register}</code> "
                 + "<code>{id}</code>. &nbsp;Mapping: one <code>element=register</code> per line.<br/>"
-                + "Search endpoints need no login. E.g. URL "
+                + "API token: only for an archive that is not public, else leave empty. E.g. URL "
                 + "<code>https://kr.anton.ch</code>.</small></html>"), c);
 
         int ok = JOptionPane.showConfirmDialog(parent, form, "anton-oxy settings",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (ok == JOptionPane.OK_OPTION) {
             config.setBaseUrl(urlField.getText().trim());
+            config.setApiToken(new String(tokenField.getPassword()));
             config.setPerPage(((Number) perPage.getValue()).intValue());
             config.setInsecureTls(insecure.isSelected());
             config.setAttribute(attrField.getText().trim());

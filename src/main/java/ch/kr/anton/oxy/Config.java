@@ -17,6 +17,7 @@ final class Config {
     static final String OPT_URL      = "anton.oxy.baseUrl";
     static final String OPT_PERPAGE  = "anton.oxy.perPage";
     static final String OPT_INSECURE = "anton.oxy.insecureTls";
+    static final String OPT_TOKEN    = "anton.oxy.apiToken";
     static final String OPT_ATTR     = "anton.oxy.attribute";
     static final String OPT_TEMPLATE = "anton.oxy.template";
     static final String OPT_MAPPING  = "anton.oxy.mapping";
@@ -75,6 +76,19 @@ final class Config {
 
     void setPerPage(int n) {
         store.setOption(OPT_PERPAGE, String.valueOf(n));
+    }
+
+    /**
+     * API token for an archive that is not public; empty for a public one. Since Anton
+     * v0.100.1 such an archive answers the search only with a token.
+     */
+    String getApiToken() {
+        String v = store.getOption(OPT_TOKEN, "");
+        return v == null ? "" : v.trim();
+    }
+
+    void setApiToken(String v) {
+        store.setOption(OPT_TOKEN, v == null ? "" : v.trim());
     }
 
     boolean isInsecureTls() {
