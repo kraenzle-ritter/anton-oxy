@@ -1,5 +1,10 @@
 # anton-oxy
 
+[![Release](https://github.com/kraenzle-ritter/anton-oxy/actions/workflows/release.yml/badge.svg)](https://github.com/kraenzle-ritter/anton-oxy/actions/workflows/release.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/kraenzle-ritter/anton-oxy)](https://github.com/kraenzle-ritter/anton-oxy/releases)
+[![License](https://img.shields.io/github/license/kraenzle-ritter/anton-oxy)](LICENSE)
+[![oXygen XML Editor](https://img.shields.io/badge/oXygen-plugin-0b5394)](https://www.oxygenxml.com/)
+
 An **Oxygen XML Editor** plugin that searches actors, places and keywords **live in
 [Anton](https://kr.anton.ch)** and writes the matched id into an attribute of the
 TEI element under the caret.
